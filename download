@@ -2,5 +2,6 @@ venv/
 __pycache__/
 *.pyc
 .DS_Store
-data/*.xlsx
-data/*.csv
+.streamlit/secrets.toml
+company_enrichment_output.xlsx
+company_enrichment_output.csv
