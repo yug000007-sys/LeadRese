@@ -1,35 +1,33 @@
-# Company Auto-Enrichment Tool - Streamlit Cloud Safe Version
+# Company Enrichment Tool - Ultra Stable Streamlit Version
 
-## Deploy
+This version is made to confirm that Streamlit Cloud deployment works.
 
-1. Upload all files to GitHub repo root.
-2. Open Streamlit Community Cloud.
-3. Select repo.
-4. Main file path: `app.py`
-5. Deploy.
-
-## Input columns
-
-Recommended:
+## Files required in GitHub root
 
 ```text
-Company, City, State, Zip, Country
+app.py
+requirements.txt
+README.md
+sample_input.csv
+.streamlit/config.toml
 ```
 
-Minimum:
+## Streamlit Cloud settings
+
+Main file path:
 
 ```text
-Company, Country
+app.py
 ```
 
-## Optional Gemini
+## What this version does
 
-In Streamlit Cloud > Manage app > Secrets, add:
+- Upload Excel/CSV
+- Preview data
+- Generate required enrichment columns
+- Add search URL
+- Download Excel/CSV
 
-```toml
-GEMINI_API_KEY = "your_key_here"
-```
+## What this version does not do yet
 
-## Notes
-
-Free Streamlit Cloud and free web search can be slow or blocked. Start with 5-25 rows.
+It does not automatically research company details. Add auto-research only after this stable version deploys successfully.
