@@ -1,33 +1,18 @@
-# Company Enrichment Tool - Ultra Stable Streamlit Version
+# Company Enrichment Tool
 
-This version is made to confirm that Streamlit Cloud deployment works.
+Clean Streamlit Cloud version.
 
-## Files required in GitHub root
+## Deploy
 
-```text
-app.py
-requirements.txt
-README.md
-sample_input.csv
-.streamlit/config.toml
-```
+Upload only these files to GitHub root:
 
-## Streamlit Cloud settings
+- app.py
+- requirements.txt
+- README.md
+- sample_input.csv
+
+In Streamlit Cloud:
 
 Main file path:
 
-```text
 app.py
-```
-
-## What this version does
-
-- Upload Excel/CSV
-- Preview data
-- Generate required enrichment columns
-- Add search URL
-- Download Excel/CSV
-
-## What this version does not do yet
-
-It does not automatically research company details. Add auto-research only after this stable version deploys successfully.

@@ -5,8 +5,9 @@ import streamlit as st
 st.set_page_config(page_title="Company Enrichment Tool", layout="wide")
 
 st.title("Company Enrichment Tool")
-st.success("App loaded successfully.")
-st.caption("Upload Excel/CSV, preview records, generate output template, and download Excel.")
+st.success("App is working successfully.")
+
+st.write("Upload your company Excel/CSV file and download the formatted output.")
 
 INPUT_COLUMNS = ["Company", "City", "State", "Zip", "Country"]
 
@@ -29,42 +30,47 @@ OUTPUT_COLUMNS = [
     "Remarks",
 ]
 
-def clean(v):
-    if pd.isna(v):
+def clean(value):
+    if pd.isna(value):
         return ""
-    return str(v).strip()
+    return str(value).strip()
 
 def normalize_columns(df):
-    rename = {}
+    rename_map = {}
     for col in df.columns:
         key = str(col).strip().lower().replace(" ", "").replace("_", "")
         if key in ["company", "companyname", "name"]:
-            rename[col] = "Company"
+            rename_map[col] = "Company"
         elif key in ["city", "town"]:
-            rename[col] = "City"
+            rename_map[col] = "City"
         elif key in ["state", "province", "region"]:
-            rename[col] = "State"
+            rename_map[col] = "State"
         elif key in ["zip", "zipcode", "postal", "postalcode", "postcode"]:
-            rename[col] = "Zip"
+            rename_map[col] = "Zip"
         elif key in ["country", "nation"]:
-            rename[col] = "Country"
-    df = df.rename(columns=rename)
+            rename_map[col] = "Country"
+
+    df = df.rename(columns=rename_map)
+
     for col in INPUT_COLUMNS:
         if col not in df.columns:
             df[col] = ""
+
     return df
 
-def make_output(df):
+def create_output(df):
     rows = []
-    for _, r in df.iterrows():
-        company = clean(r.get("Company", ""))
-        city = clean(r.get("City", ""))
-        state = clean(r.get("State", ""))
-        zip_code = clean(r.get("Zip", ""))
-        country = clean(r.get("Country", ""))
 
-        query = "+".join([x for x in [company, city, state, zip_code, country, "official address phone website"] if x])
-        source = f"https://www.google.com/search?q={query}"
+    for _, row in df.iterrows():
+        company = clean(row.get("Company", ""))
+        city = clean(row.get("City", ""))
+        state = clean(row.get("State", ""))
+        zip_code = clean(row.get("Zip", ""))
+        country = clean(row.get("Country", ""))
+
+        search_query = "+".join(
+            [x for x in [company, city, state, zip_code, country, "official address phone website"] if x]
+        )
 
         rows.append({
             "Company": company,
@@ -81,71 +87,76 @@ def make_output(df):
             "LineOfBusiness": "Needs research",
             "ParentName": "Needs research",
             "Confidence": "Low",
-            "SourceURL": source,
-            "Remarks": "Stable version. Use SourceURL for manual/AI research. Auto-research can be added after deployment works.",
+            "SourceURL": f"https://www.google.com/search?q={search_query}",
+            "Remarks": "Clean Streamlit Cloud version. Auto-research can be added after app runs correctly.",
         })
-    return pd.DataFrame(rows)[OUTPUT_COLUMNS]
 
-def to_excel(df):
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+    return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
+
+def excel_bytes(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Enriched")
-    return bio.getvalue()
+    return output.getvalue()
 
-with st.sidebar:
-    st.header("Status")
-    st.write("Version: ultra-stable")
-    st.write("Dependencies: streamlit, pandas, openpyxl only")
+uploaded_file = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
 
-uploaded = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
-
-if uploaded:
-    try:
-        if uploaded.name.lower().endswith(".csv"):
-            df = pd.read_csv(uploaded)
-        else:
-            df = pd.read_excel(uploaded)
-
-        df = normalize_columns(df)
-
-        st.subheader("Input preview")
-        st.dataframe(df[INPUT_COLUMNS].head(100), use_container_width=True)
-
-        max_rows = st.number_input("Rows to process", 1, len(df), min(len(df), 100))
-
-        if st.button("Generate output file"):
-            out = make_output(df.head(max_rows))
-            st.subheader("Output preview")
-            st.dataframe(out, use_container_width=True)
-
-            st.download_button(
-                "Download Excel",
-                data=to_excel(out),
-                file_name="company_enrichment_output.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-            st.download_button(
-                "Download CSV",
-                data=out.to_csv(index=False).encode("utf-8"),
-                file_name="company_enrichment_output.csv",
-                mime="text/csv",
-            )
-
-    except Exception as e:
-        st.error("File processing error")
-        st.exception(e)
-else:
+if uploaded_file is None:
     sample = pd.DataFrame([
         {"Company": "Boeing", "City": "Tanner", "State": "AL", "Zip": "35671", "Country": "USA"},
         {"Company": "BOEL", "City": "Osaka-Shi", "State": "", "Zip": "", "Country": "Japan"},
     ])
-    st.subheader("Sample input")
+
+    st.subheader("Sample Input")
     st.dataframe(sample, use_container_width=True)
+
     st.download_button(
-        "Download sample CSV",
+        "Download Sample CSV",
         data=sample.to_csv(index=False).encode("utf-8"),
         file_name="sample_input.csv",
         mime="text/csv",
     )
 
-st.info("First confirm this app opens on Streamlit Cloud. Then we can add auto-research safely.")
+else:
+    try:
+        if uploaded_file.name.lower().endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+
+        df = normalize_columns(df)
+
+        st.subheader("Input Preview")
+        st.dataframe(df[INPUT_COLUMNS].head(100), use_container_width=True)
+
+        rows_to_process = st.number_input(
+            "Rows to process",
+            min_value=1,
+            max_value=len(df),
+            value=min(len(df), 100),
+            step=1,
+        )
+
+        if st.button("Generate Output"):
+            output_df = create_output(df.head(rows_to_process))
+
+            st.subheader("Output Preview")
+            st.dataframe(output_df, use_container_width=True)
+
+            st.download_button(
+                "Download Excel",
+                data=excel_bytes(output_df),
+                file_name="company_enrichment_output.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            st.download_button(
+                "Download CSV",
+                data=output_df.to_csv(index=False).encode("utf-8"),
+                file_name="company_enrichment_output.csv",
+                mime="text/csv",
+            )
+
+    except Exception as error:
+        st.error("Error processing file")
+        st.exception(error)
