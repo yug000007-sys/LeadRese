@@ -1,4 +1,5 @@
 import io
+    import json
     import re
     import time
     from urllib.parse import quote_plus, urlparse
@@ -7,13 +8,9 @@ import io
     import requests
     import streamlit as st
     from bs4 import BeautifulSoup
-    from duckduckgo_search import DDGS
 
-    try:
-        import google.generativeai as genai
-    except Exception:
-        genai = None
 
+    st.set_page_config(page_title="Company Auto-Enrichment Tool", layout="wide")
 
     INPUT_COLUMNS = ["Company", "City", "State", "Zip", "Country"]
 
@@ -36,61 +33,17 @@ import io
         "Remarks",
     ]
 
+
     SIC_NAICS_RULES = [
-        {
-            "keywords": ["aerospace", "aircraft", "defense", "missile", "aviation", "space"],
-            "sic": "3721 / 3761",
-            "naics": "336411 / 336414",
-            "lob": "Aerospace and defense manufacturing, engineering, and support services.",
-        },
-        {
-            "keywords": ["automotive", "vehicle", "motor", "car", "truck", "parts"],
-            "sic": "3711 / 3714",
-            "naics": "336111 / 336390",
-            "lob": "Automotive manufacturing, parts, systems, or related services.",
-        },
-        {
-            "keywords": ["software", "saas", "technology", "cloud", "it services", "cybersecurity"],
-            "sic": "7372 / 7373",
-            "naics": "541511 / 541512",
-            "lob": "Software, IT services, cloud, or technology solutions.",
-        },
-        {
-            "keywords": ["consulting", "business consulting", "management consulting"],
-            "sic": "8742 / 8748",
-            "naics": "541611",
-            "lob": "Business, management, or professional consulting services.",
-        },
-        {
-            "keywords": ["logistics", "transport", "freight", "warehouse", "supply chain"],
-            "sic": "4731 / 4225",
-            "naics": "488510 / 493110",
-            "lob": "Logistics, freight, warehousing, or supply-chain services.",
-        },
-        {
-            "keywords": ["manufacturer", "manufacturing", "factory", "industrial", "machinery"],
-            "sic": "3999 / 3599",
-            "naics": "339999 / 333249",
-            "lob": "Industrial manufacturing or machinery-related operations.",
-        },
-        {
-            "keywords": ["hospital", "healthcare", "medical", "clinic", "pharma"],
-            "sic": "8062 / 2834",
-            "naics": "622110 / 325412",
-            "lob": "Healthcare, medical, pharmaceutical, or related services.",
-        },
-        {
-            "keywords": ["bank", "financial", "insurance", "investment", "credit"],
-            "sic": "6021 / 6411",
-            "naics": "522110 / 524210",
-            "lob": "Banking, financial, insurance, or investment services.",
-        },
+        (["aerospace", "aircraft", "defense", "missile", "aviation", "space"], "3721 / 3761", "336411 / 336414", "Aerospace and defense manufacturing, engineering, and support services."),
+        (["automotive", "vehicle", "motor", "car", "truck", "parts"], "3711 / 3714", "336111 / 336390", "Automotive manufacturing, parts, systems, or related services."),
+        (["software", "saas", "technology", "cloud", "it services", "cybersecurity"], "7372 / 7373", "541511 / 541512", "Software, IT services, cloud, or technology solutions."),
+        (["consulting", "business consulting", "management consulting"], "8742 / 8748", "541611", "Business, management, or professional consulting services."),
+        (["logistics", "transport", "freight", "warehouse", "supply chain"], "4731 / 4225", "488510 / 493110", "Logistics, freight, warehousing, or supply-chain services."),
+        (["manufacturer", "manufacturing", "factory", "industrial", "machinery"], "3999 / 3599", "339999 / 333249", "Industrial manufacturing or machinery-related operations."),
+        (["hospital", "healthcare", "medical", "clinic", "pharma"], "8062 / 2834", "622110 / 325412", "Healthcare, medical, pharmaceutical, or related services."),
+        (["bank", "financial", "insurance", "investment", "credit"], "6021 / 6411", "522110 / 524210", "Banking, financial, insurance, or investment services."),
     ]
-
-
-    st.set_page_config(page_title="Company Auto-Enrichment Tool", layout="wide")
-    st.title("Company Auto-Enrichment Tool")
-    st.caption("Upload Excel/CSV → web research → structured enrichment → download Excel.")
 
 
     def clean_value(value):
@@ -102,8 +55,7 @@ import io
     def normalize_columns(df):
         rename_map = {}
         for c in df.columns:
-            c2 = str(c).strip()
-            low = c2.lower().replace(" ", "").replace("_", "")
+            low = str(c).strip().lower().replace(" ", "").replace("_", "")
             if low in ["company", "companyname", "name"]:
                 rename_map[c] = "Company"
             elif low in ["city", "town"]:
@@ -121,126 +73,120 @@ import io
         return df
 
 
-    def safe_get(url, timeout=8):
+    def search_duckduckgo_html(query, max_results=5):
+        """No extra dependency. Uses DuckDuckGo HTML page and parses result links."""
+        results = []
+        url = "https://duckduckgo.com/html/?q=" + quote_plus(query)
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0 Safari/537.36"
-            )
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "en-US,en;q=0.9",
         }
         try:
-            r = requests.get(url, headers=headers, timeout=timeout)
-            if r.status_code == 200 and r.text:
-                return r.text[:50000]
-        except Exception:
-            return ""
-        return ""
-
-
-    def ddg_search(query, max_results=5):
-        results = []
-        try:
-            with DDGS() as ddgs:
-                for r in ddgs.text(query, max_results=max_results):
-                    results.append({
-                        "title": r.get("title", ""),
-                        "href": r.get("href", ""),
-                        "body": r.get("body", ""),
-                    })
+            r = requests.get(url, headers=headers, timeout=12)
+            soup = BeautifulSoup(r.text, "html.parser")
+            items = soup.select(".result")
+            for item in items[:max_results]:
+                link = item.select_one(".result__a")
+                snippet = item.select_one(".result__snippet")
+                if not link:
+                    continue
+                href = link.get("href", "")
+                title = link.get_text(" ", strip=True)
+                body = snippet.get_text(" ", strip=True) if snippet else ""
+                if href:
+                    results.append({"title": title, "href": href, "body": body})
         except Exception as e:
-            st.warning(f"Search failed for query: {query}. Error: {e}")
+            results.append({"title": "Search error", "href": "", "body": str(e)})
         return results
 
 
+    def safe_get_text(url):
+        if not url or not url.startswith("http"):
+            return ""
+        headers = {"User-Agent": "Mozilla/5.0"}
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code != 200:
+                return ""
+            soup = BeautifulSoup(r.text, "html.parser")
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            return " ".join(soup.get_text(" ").split())[:12000]
+        except Exception:
+            return ""
+
+
     def make_queries(company, city, state, zip_code, country):
-        parts = [company, city, state, zip_code, country]
-        base = " ".join([p for p in parts if p]).strip()
+        base = " ".join([x for x in [company, city, state, zip_code, country] if x]).strip()
         queries = [
-            f'{base} official address phone website',
-            f'{base} company profile address',
-            f'{company} {country} official website address',
+            f"{base} official address phone website",
+            f"{base} company profile address",
+            f"{company} {country} official website headquarters address",
         ]
         if city or zip_code:
             queries.insert(0, f'"{company}" "{city}" "{zip_code}" "{country}" address phone')
-        return [q.strip() for q in queries if q.strip()]
+        return [q for q in queries if q.strip()]
 
 
-    def extract_text_from_url(url):
-        html = safe_get(url)
-        if not html:
-            return ""
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style", "noscript", "svg"]):
-            tag.decompose()
-        text = " ".join(soup.get_text(" ").split())
-        return text[:12000]
+    def find_website(results):
+        blocked = ["duckduckgo.", "google.", "facebook.", "linkedin.", "x.com", "twitter.", "bloomberg.", "dnb.", "zoominfo."]
+        for r in results:
+            href = r.get("href", "")
+            if not href.startswith("http"):
+                continue
+            netloc = urlparse(href).netloc.lower()
+            if netloc and not any(b in netloc for b in blocked):
+                return f"{urlparse(href).scheme}://{netloc}"
+        return "Not verified"
 
 
     def find_phone(text):
         patterns = [
-            r"\+\d{1,3}[\s\-.]?\(?\d{1,4}\)?[\s\-.]?\d{2,5}[\s\-.]?\d{2,5}[\s\-.]?\d{2,6}",
+            r"\+\d{1,3}[\s\-.]?\(?\d{1,5}\)?[\s\-.]?\d{2,5}[\s\-.]?\d{2,5}[\s\-.]?\d{2,6}",
             r"\(?\d{3}\)?[\s\-.]\d{3}[\s\-.]\d{4}",
-            r"\d{2,5}[\s\-.]\d{2,5}[\s\-.]\d{3,5}",
         ]
-        for p in patterns:
-            m = re.search(p, text)
+        for pattern in patterns:
+            m = re.search(pattern, text)
             if m:
                 return m.group(0).strip()
         return "Not publicly disclosed"
 
 
-    def find_website(search_results):
-        bad_domains = ["google.", "facebook.", "linkedin.", "x.com", "twitter.", "bloomberg.", "dnb.", "zoominfo.", "yelp.", "mapquest."]
-        for r in search_results:
-            href = r.get("href", "")
-            if not href:
-                continue
-            domain = urlparse(href).netloc.lower()
-            if domain and not any(bad in domain for bad in bad_domains):
-                return f"{urlparse(href).scheme}://{domain}".rstrip("/")
-        return "Not verified"
-
-
     def classify_business(text):
         low = text.lower()
-        for rule in SIC_NAICS_RULES:
-            if any(k in low for k in rule["keywords"]):
-                return rule["sic"], rule["naics"], rule["lob"]
+        for keywords, sic, naics, lob in SIC_NAICS_RULES:
+            if any(k in low for k in keywords):
+                return sic, naics, lob
         return "Needs manual verification", "Needs manual verification", "General business operations; verify line of business from official source."
 
 
-    def simple_address_guess(text, city, state, zip_code, country):
-        # Conservative extraction. If no clear match, mark needs review.
-        snippets = []
+    def guess_address(text, city, state, zip_code, country):
         tokens = [t for t in [city, state, zip_code, country] if t]
+        best = ""
+        low = text.lower()
         for token in tokens:
-            idx = text.lower().find(token.lower())
+            idx = low.find(token.lower())
             if idx >= 0:
-                start = max(0, idx - 120)
-                end = min(len(text), idx + 180)
-                snippets.append(text[start:end])
-        if snippets:
-            s = max(snippets, key=len)
-            s = re.sub(r"\s+", " ", s).strip()
-            # Remove obvious UI text.
-            if len(s) > 40:
-                return s[:280]
+                snippet = text[max(0, idx - 120): min(len(text), idx + 180)]
+                if len(snippet) > len(best):
+                    best = snippet
+        if best:
+            return re.sub(r"\s+", " ", best).strip()[:280]
         return "Needs manual verification"
 
 
-    def confidence_score(company, city, country, search_results, website, address):
+    def confidence(company, city, country, results, address, website):
+        combined = " ".join([r.get("title", "") + " " + r.get("body", "") + " " + r.get("href", "") for r in results]).lower()
         score = 0
-        combined = " ".join([r.get("title", "") + " " + r.get("body", "") + " " + r.get("href", "") for r in search_results]).lower()
         if company and company.lower() in combined:
             score += 35
         if city and city.lower() in combined:
             score += 20
         if country and country.lower() in combined:
             score += 15
-        if website and website not in ["Not verified", ""]:
+        if website != "Not verified":
             score += 15
-        if address and "manual" not in address.lower() and "needs" not in address.lower():
+        if "Needs manual" not in address:
             score += 15
         if score >= 75:
             return "High"
@@ -249,46 +195,31 @@ import io
         return "Low"
 
 
-    def gemini_enrich(api_key, company, city, state, zip_code, country, search_results, page_text):
-        if not api_key or genai is None:
+    def gemini_json(api_key, payload):
+        if not api_key:
             return None
         try:
+            import google.generativeai as genai
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel("gemini-1.5-flash")
-            evidence = {
-                "input": {
-                    "Company": company,
-                    "City": city,
-                    "State": state,
-                    "Zip": zip_code,
-                    "Country": country,
-                },
-                "search_results": search_results[:5],
-                "page_text_excerpt": page_text[:8000],
-            }
-            prompt = f"""
-You are a B2B company research assistant. Return only valid JSON.
-
-Task: Enrich this company record using the evidence. Prefer official company website or trusted business directories.
-Do not invent. If not found, use "Not publicly disclosed" or "Needs manual verification".
-
-Required JSON keys:
+            prompt = """
+Return only valid JSON with these keys:
 Company, Address, City, State, Zip, Country, PhoneResearch, Website, SIC, NAICS,
-NoOfEmployees(This site only), LineOfBusiness, ParentName, Confidence, SourceURL, Remarks
+NoOfEmployees(This site only), LineOfBusiness, ParentName, Confidence, SourceURL, Remarks.
+
+Do not invent. Use "Needs manual verification" or "Not publicly disclosed" when missing.
 
 Evidence:
-{json.dumps(evidence, ensure_ascii=False)}
-"""
+""" + json.dumps(payload, ensure_ascii=False)
             response = model.generate_content(prompt)
-            raw = response.text.strip()
-            raw = raw.replace("```json", "").replace("```", "").strip()
-            data = json.loads(raw)
-            return data
+            raw = response.text.strip().replace("```json", "").replace("```", "").strip()
+            return json.loads(raw)
         except Exception as e:
-            return {"_error": str(e)}
+            st.warning(f"Gemini step skipped: {e}")
+            return None
 
 
-    def enrich_one(row, use_gemini, api_key):
+    def enrich(row, use_gemini, api_key):
         company = clean_value(row.get("Company", ""))
         city = clean_value(row.get("City", ""))
         state = clean_value(row.get("State", ""))
@@ -296,91 +227,86 @@ Evidence:
         country = clean_value(row.get("Country", ""))
 
         queries = make_queries(company, city, state, zip_code, country)
-        all_results = []
-        for q in queries[:3]:
-            all_results.extend(ddg_search(q, max_results=4))
-            time.sleep(0.4)
+        results = []
+        for q in queries[:2]:
+            results.extend(search_duckduckgo_html(q, max_results=4))
+            time.sleep(0.5)
 
-        # Deduplicate results.
         seen = set()
-        search_results = []
-        for r in all_results:
+        deduped = []
+        for r in results:
             href = r.get("href", "")
-            if href and href not in seen:
+            if href not in seen:
                 seen.add(href)
-                search_results.append(r)
+                deduped.append(r)
+        results = deduped[:8]
 
-        website = find_website(search_results)
-        source_url = search_results[0]["href"] if search_results else f"https://duckduckgo.com/?q={quote_plus(queries[0])}"
+        website = find_website(results)
+        source = results[0].get("href", "") if results else "https://duckduckgo.com/?q=" + quote_plus(queries[0])
 
         page_text = ""
-        for r in search_results[:3]:
-            page_text += "\n\nSOURCE: " + r.get("href", "") + "\n"
-            page_text += extract_text_from_url(r.get("href", ""))[:6000]
+        for r in results[:2]:
+            page_text += "\n" + safe_get_text(r.get("href", ""))
+
+        combined = " ".join([r.get("title", "") + " " + r.get("body", "") for r in results]) + " " + page_text
+
+        base_result = {
+            "Company": company,
+            "Address": guess_address(combined, city, state, zip_code, country),
+            "City": city or "Needs manual verification",
+            "State": state or "Needs manual verification",
+            "Zip": zip_code or "Needs manual verification",
+            "Country": country or "Needs manual verification",
+            "PhoneResearch": find_phone(combined),
+            "Website": website,
+            "SIC": "",
+            "NAICS": "",
+            "NoOfEmployees(This site only)": "Not publicly disclosed",
+            "LineOfBusiness": "",
+            "ParentName": "Needs manual verification",
+            "Confidence": "",
+            "SourceURL": source,
+            "Remarks": "Auto-enriched from public search. Review before use.",
+        }
+
+        sic, naics, lob = classify_business(combined)
+        base_result["SIC"] = sic
+        base_result["NAICS"] = naics
+        base_result["LineOfBusiness"] = lob
+        base_result["Confidence"] = confidence(company, city, country, results, base_result["Address"], website)
 
         if use_gemini and api_key:
-            ai_result = gemini_enrich(api_key, company, city, state, zip_code, country, search_results, page_text)
-            if ai_result and "_error" not in ai_result:
-                clean = {col: ai_result.get(col, "") for col in OUTPUT_COLUMNS}
+            payload = {"input": dict(row), "search_results": results, "page_text_excerpt": combined[:8000], "draft": base_result}
+            ai = gemini_json(api_key, payload)
+            if ai:
                 for col in OUTPUT_COLUMNS:
-                    if not clean.get(col):
-                        clean[col] = "Needs manual verification"
-                return clean
-            elif ai_result and "_error" in ai_result:
-                st.warning(f"Gemini failed for {company}: {ai_result['_error']}")
+                    base_result[col] = ai.get(col, base_result.get(col, "Needs manual verification"))
 
-        combined_text = " ".join([r.get("title", "") + " " + r.get("body", "") for r in search_results]) + " " + page_text
-        phone = find_phone(combined_text)
-        sic, naics, lob = classify_business(combined_text)
-        address = simple_address_guess(combined_text, city, state, zip_code, country)
-        confidence = confidence_score(company, city, country, search_results, website, address)
-
-        parent = "Needs manual verification"
-        if "subsidiary" in combined_text.lower() or "parent" in combined_text.lower():
-            parent = "Possible parent/subsidiary relationship found; verify source."
-
-        return {
-            "Company": company,
-            "Address": address,
-            "City": city if city else "Needs manual verification",
-            "State": state if state else "Needs manual verification",
-            "Zip": zip_code if zip_code else "Needs manual verification",
-            "Country": country if country else "Needs manual verification",
-            "PhoneResearch": phone,
-            "Website": website,
-            "SIC": sic,
-            "NAICS": naics,
-            "NoOfEmployees(This site only)": "Not publicly disclosed",
-            "LineOfBusiness": lob,
-            "ParentName": parent,
-            "Confidence": confidence,
-            "SourceURL": source_url,
-            "Remarks": "Auto-enriched from public web search. Review Low/Medium confidence records before use.",
-        }
+        return base_result
 
 
     def to_excel_bytes(df):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        bio = io.BytesIO()
+        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Enriched")
-        return output.getvalue()
+        return bio.getvalue()
 
+
+    st.title("Company Auto-Enrichment Tool")
+    st.caption("Safe Streamlit Cloud version. Upload Excel/CSV and download enriched output.")
 
     with st.sidebar:
         st.header("Settings")
-        max_rows_default = 25
-        delay = st.number_input("Delay between records, seconds", min_value=0.0, max_value=10.0, value=1.0, step=0.5)
-        use_gemini = st.checkbox("Use Gemini AI if API key is configured", value=True)
-        st.caption("For Streamlit Cloud, add GEMINI_API_KEY in App settings → Secrets.")
+        rows_default = st.number_input("Default rows to process", 1, 100, 10)
+        delay = st.number_input("Delay per record", 0.0, 5.0, 1.0, 0.5)
+        use_gemini = st.checkbox("Use Gemini if API key is available", value=False)
         api_key = ""
         try:
             api_key = st.secrets.get("GEMINI_API_KEY", "")
         except Exception:
             api_key = ""
         if not api_key:
-            api_key = st.text_input("Optional Gemini API Key", type="password")
-        st.warning("Free web search/scraping can be slow or blocked. Process small batches first.")
-
+            api_key = st.text_input("Optional Gemini API key", type="password")
 
     uploaded = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
 
@@ -392,62 +318,54 @@ Evidence:
                 df = pd.read_excel(uploaded)
             df = normalize_columns(df)
 
+            if "Company" not in df.columns:
+                st.error("Missing Company column.")
+                st.stop()
+
             st.subheader("Input preview")
             st.dataframe(df[INPUT_COLUMNS].head(50), use_container_width=True)
 
-            max_rows = st.number_input("Rows to process now", min_value=1, max_value=len(df), value=min(len(df), max_rows_default), step=1)
+            max_rows = st.number_input("Rows to process now", 1, len(df), min(len(df), int(rows_default)))
 
-            if st.button("Start auto-enrichment"):
-                work_df = df.head(max_rows).copy()
+            if st.button("Start enrichment"):
                 results = []
                 progress = st.progress(0)
                 status = st.empty()
+                work = df.head(max_rows)
 
-                for i, (_, row) in enumerate(work_df.iterrows(), start=1):
-                    company = clean_value(row.get("Company", ""))
-                    status.write(f"Processing {i}/{len(work_df)}: {company}")
-                    results.append(enrich_one(row, use_gemini, api_key))
-                    progress.progress(i / len(work_df))
+                for i, (_, row) in enumerate(work.iterrows(), start=1):
+                    status.write(f"Processing {i}/{len(work)}: {clean_value(row.get('Company',''))}")
+                    results.append(enrich(row, use_gemini, api_key))
+                    progress.progress(i / len(work))
                     time.sleep(delay)
 
-                out_df = pd.DataFrame(results)
-                out_df = out_df[OUTPUT_COLUMNS]
-
-                st.success("Done.")
-                st.subheader("Output preview")
-                st.dataframe(out_df, use_container_width=True)
+                out = pd.DataFrame(results)[OUTPUT_COLUMNS]
+                st.success("Done")
+                st.dataframe(out, use_container_width=True)
 
                 st.download_button(
                     "Download Excel",
-                    data=to_excel_bytes(out_df),
+                    data=to_excel_bytes(out),
                     file_name="company_enrichment_output.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
                 st.download_button(
                     "Download CSV",
-                    data=out_df.to_csv(index=False).encode("utf-8"),
+                    data=out.to_csv(index=False).encode("utf-8"),
                     file_name="company_enrichment_output.csv",
                     mime="text/csv",
                 )
 
         except Exception as e:
-            st.error("App error")
+            st.error("The app error is shown below. Copy this if you need help.")
             st.exception(e)
     else:
         sample = pd.DataFrame([
             {"Company": "Boeing", "City": "Tanner", "State": "AL", "Zip": "35671", "Country": "USA"},
             {"Company": "BOEL", "City": "Osaka-Shi", "State": "", "Zip": "", "Country": "Japan"},
         ])
-        st.subheader("Sample input format")
+        st.subheader("Sample input")
         st.dataframe(sample, use_container_width=True)
-        st.download_button("Download sample CSV", data=sample.to_csv(index=False).encode("utf-8"), file_name="sample_input.csv", mime="text/csv")
+        st.download_button("Download sample CSV", sample.to_csv(index=False).encode("utf-8"), "sample_input.csv", "text/csv")
 
-    st.divider()
-    st.markdown("""
-    ### Notes
-    - Best input: `Company + City + State + Zip + Country`
-    - Minimum input: `Company + Country`
-    - Records with only company/country may return headquarters or ambiguous results.
-    - Review all Low/Medium confidence rows.
-    - For better accuracy, use Gemini API key in Streamlit Secrets.
-    """)
+    st.info("For Streamlit Cloud, process small batches first: 5–25 rows. Free search may be blocked or slow.")
